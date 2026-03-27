@@ -194,7 +194,7 @@ class BaseTrainer:
             raise TypeError
 
         # Load network
-        checkpoint_dict = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint_dict = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
         print("Loading checkpoint from ", checkpoint_path)
 
         assert net_type == checkpoint_dict['net_type'], 'Network is not of correct type.'
@@ -266,7 +266,7 @@ class BaseTrainer:
 
         # Load network
         print("Loading state dict of pretrained model from ", checkpoint_path)
-        checkpoint_dict = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint_dict = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
         if not distill:
             assert net_type == checkpoint_dict['net_type'], 'Network is not of correct type.'

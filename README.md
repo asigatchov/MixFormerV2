@@ -33,11 +33,15 @@ MixFormerV2 works well for different benchmarks and can achieve **70.6%** AUC on
 
 
 ## Install the environment
-Use the Anaconda
-``` bash
-conda create -n mixformer2 python=3.6
-conda activate mixformer2
+Use `uv` with Python 3.12.
+```bash
+uv python pin 3.12
 bash install_requirements.sh
+```
+
+After installation, run commands directly with `uv run`, for example:
+```bash
+uv run python tracking/create_default_local_file.py --workspace_dir . --data_dir ./data --save_dir .
 ```
 
 ## Data Preparation
@@ -68,7 +72,7 @@ Put the tracking datasets in ./data. It should look like:
 ## Set project paths
 Run the following command to set paths for this project
 ```
-python tracking/create_default_local_file.py --workspace_dir . --data_dir ./data --save_dir .
+uv run python tracking/create_default_local_file.py --workspace_dir . --data_dir ./data --save_dir .
 ```
 After running this command, you can also modify paths by editing these two files
 ```
@@ -83,14 +87,14 @@ You can follow instructions (in Chinese now) in [training.md](tutorials/training
 Example scripts can be found in `tracking/train_mixformer.sh`.
 
 ``` bash
-bash tracking/train_mixformer.sh
+uv run bash tracking/train_mixformer.sh
 ```
 
 ## Test and evaluate MixFormerV2 on benchmarks
 - LaSOT/GOT10k-test/TrackingNet/OTB100/UAV123/TNL2k. More details of test settings can be found in `tracking/test_mixformer.sh`.
 
 ``` bash
-bash tracking/test_mixformer.sh
+uv run bash tracking/test_mixformer.sh
 
 ```
 
