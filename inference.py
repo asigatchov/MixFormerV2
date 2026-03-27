@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import importlib
 import os
 import sys
+import types
 from pathlib import Path
 
 import cv2
@@ -147,7 +149,7 @@ class MixFormerV2Runner:
         self.cfg = cfg
         self.device = device
         self.network = build_mixformer2_vit_online(cfg, train=False)
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        checkpoint = load_checkpoint_weights(checkpoint_path)
         self.network.load_state_dict(checkpoint["net"], strict=True)
         self.network.to(device)
         self.network.eval()
@@ -236,6 +238,67 @@ class MixFormerV2Runner:
         cx_real = cx + (cx_prev - half_side)
         cy_real = cy + (cy_prev - half_side)
         return [cx_real - 0.5 * width, cy_real - 0.5 * height, width, height]
+
+
+def load_checkpoint_weights(checkpoint_path):
+    environment_settings_cls = ensure_train_local_module()
+    safe_types = []
+
+    try:
+        from torch.serialization import safe_globals
+        from lib.train.admin.settings import Settings
+        from lib.train.admin.stats import AverageMeter, StatValue
+
+        safe_types = [AverageMeter, StatValue, Settings, environment_settings_cls]
+    except Exception:
+        safe_globals = None
+
+    try:
+        if safe_globals is None:
+            raise RuntimeError("safe_globals is unavailable")
+        with safe_globals(safe_types):
+            return torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    except TypeError:
+        return torch.load(checkpoint_path, map_location="cpu")
+    except Exception:
+        return torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+
+
+def ensure_train_local_module():
+    module_name = "lib.train.admin.local"
+    try:
+        module = importlib.import_module(module_name)
+        return module.EnvironmentSettings
+    except ModuleNotFoundError:
+        module = types.ModuleType(module_name)
+
+        class EnvironmentSettings:
+            def __init__(self):
+                self.workspace_dir = str(ROOT_DIR)
+                self.tensorboard_dir = str(ROOT_DIR / "tensorboard")
+                self.pretrained_networks = str(ROOT_DIR / "pretrained_networks")
+                self.lasot_dir = ""
+                self.got10k_dir = ""
+                self.lasot_lmdb_dir = ""
+                self.got10k_lmdb_dir = ""
+                self.trackingnet_dir = ""
+                self.trackingnet_lmdb_dir = ""
+                self.coco_dir = ""
+                self.coco_lmdb_dir = ""
+                self.lvis_dir = ""
+                self.sbd_dir = ""
+                self.imagenet_dir = ""
+                self.imagenet_lmdb_dir = ""
+                self.imagenetdet_dir = ""
+                self.ecssd_dir = ""
+                self.hkuis_dir = ""
+                self.msra10k_dir = ""
+                self.davis_dir = ""
+                self.youtubevos_dir = ""
+
+        module.EnvironmentSettings = EnvironmentSettings
+        sys.modules[module_name] = module
+        return EnvironmentSettings
 
 
 def draw_overlay(frame, bbox, score=None, label="MixFormerV2"):
