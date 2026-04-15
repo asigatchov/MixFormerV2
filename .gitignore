@@ -2,7 +2,6 @@
 *~
 *__pycache__*
 *.pyc
-*.vscode
 *.pytest_cache
 *.csv
 **/local.py
@@ -15,3 +14,12 @@
 /outputs
 /checkpoints
 /test
+*.npy
+test_inputs
+out*
+check2_correct_ops.onnx
+check0_base_optimize.onnx
+check1_fold_constant.onnx
+check3_fuse_ops.onnx
+videos/track-car4.mp4
+debug_inputs

@@ -30,9 +30,15 @@ uv pip install -p .venv/bin/python \
   thop \
   timm \
   torch \
+  torchaudio \
   torchvision \
   tqdm \
-  yacs
+  yacs \
+  onnx \
+  onnxruntime \
+  onnxsim \
+  tikzplotlib \
+  git+https://github.com/votchallenge/vot-toolkit-python
 
 echo ""
 echo "****************** Installation complete ******************"

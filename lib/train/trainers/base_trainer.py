@@ -6,6 +6,10 @@ from lib.train.admin import multigpu
 from torch.utils.data.distributed import DistributedSampler
 
 from lib.utils.misc import is_main_process
+from lib.train.admin.stats import AverageMeter
+
+# Add safe globals for PyTorch 2.6+ compatibility
+torch.serialization.add_safe_globals([AverageMeter])
 
 
 class BaseTrainer:

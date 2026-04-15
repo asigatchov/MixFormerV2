@@ -1,0 +1,159 @@
+{
+    // Use IntelliSense to learn about available attributes.
+    // Hover to view descriptions of existing properties.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Train MixFormer Distill",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/lib/train/train_script.py",
+            "args": [
+                "--script",
+                "mixformer2_vit",
+                "--config",
+                "student_288_depth12",
+                "--save_dir",
+                ".",
+                "--use_lmdb",
+                "0",
+                "--script_prv",
+                "None",
+                "--config_prv",
+                "baseline",
+                "--distill",
+                "1",
+                "--script_teacher",
+                "mixformer_vit",
+                "--config_teacher",
+                "teacher_mixvit_b",
+                "--checkpoint_teacher_path",
+                "./models/mixformer_vit_base_online.pth.tar"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Distributed Train",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "torch.distributed.run",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--nproc_per_node",
+                "4",
+                "lib/train/run_training.py",
+                "--script",
+                "mixformer2_vit",
+                "--config",
+                "student_288_depth12",
+                "--save_dir",
+                ".",
+                "--use_lmdb",
+                "0",
+                "--distill",
+                "1",
+                "--config_prv",
+                "baseline",
+                "--script_teacher",
+                "mixformer_vit",
+                "--config_teacher",
+                "teacher_mixvit_b",
+                "--checkpoint_teacher_path",
+                "./models/mixformer_vit_base_online.pth.tar"
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0, 1, 2, 3",
+                "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/lib/train"
+            },
+            "justMyCode": true
+        },
+        {
+            "name": "video_demo",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "tracking/video_demo.py",
+            "console": "integratedTerminal",
+            "args": [
+                "mixformer2_vit_online", // Folder name under experiments/<script_name>/
+                "224_depth4_mlp1_score", // Config name under experiments/<tracker_name>/
+                "/home/tl/data_80/data/video/110/RGB/uav/fz_1111-1114/uav",
+                "--params__model",
+                "models/MixFormerV2/mixformerv2_small.pth.tar",
+                // "--params__search_area_scale",
+                // "5.0",
+                // "--params__update_interval",
+                // "30",
+                // "--zoomin",
+                // "--save_video",
+                // "--save_yolo",
+                // "--yolo_label", "1"
+                "--yolo_model", "/home/tl/work/ultralytics/runs/detect/yolov11m_110_rgb_640_v10/weights/best.pt",
+                "--use_yolo_init",
+                "--save_roi",
+                "--max_per_folder", "200",
+                "--no_display"
+            ],
+            "env": {
+                "DISPLAY": "tl-Ai:10.0"
+            }
+        },
+        {
+            "name": "Export ONNX Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "export_onnx.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--checkpoint",
+                "./models/MixFormerV2/mixformerv2_small.pth.tar",
+                "--config_name",
+                "224_depth4_mlp1_score",
+                "--output",
+                "./models/mixformerv2_online_small.onnx",
+                "--batch_mode",
+                "static",
+                "--batch_size",
+                "1",
+                "--opset_version",
+                "11"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Test ONNX Inference",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "test_onnx_inference.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--onnx_path",
+                "models/mixformerv2_online_small.onnx",
+                "--checkpoint",
+                "models/MixFormerV2/mixformerv2_small.pth.tar",
+                "--save_inputs_dir",
+                "./test_inputs",
+                "--tracker_name",
+                "mixformer2_vit_online",
+                "--config_name",
+                "224_depth4_mlp1_score",
+                "--template_npy",
+                "./test_inputs/template_input.npy",
+                "--online_template_npy",
+                "./test_inputs/online_template_input.npy",
+                "--search_npy",
+                "./test_inputs/search_input.npy"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ]
+}
