@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import math
 from pathlib import Path
 
 import cv2
 import numpy as np
 import onnxruntime
-
-from lib.test.tracker.tracker_utils import PreprocessorX_onnx
-from lib.train.data.processing_utils import sample_target
-from lib.utils.box_ops import clip_box
 
 
 WINDOW_NAME = "MixFormerV2 ONNX"
@@ -16,6 +13,65 @@ MODEL_DEFAULTS = {
     "small": {"template_factor": 2.0, "search_factor": 4.5},
     "base": {"template_factor": 2.0, "search_factor": 4.5},
 }
+
+
+class PreprocessorXOnnx:
+    def __init__(self):
+        self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((1, 3, 1, 1))
+        self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((1, 3, 1, 1))
+
+    def process(self, img_arr, amask_arr):
+        img_arr_4d = img_arr[np.newaxis, :, :, :].transpose(0, 3, 1, 2).astype(np.float32)
+        img_arr_4d = (img_arr_4d / 255.0 - self.mean) / self.std
+        amask_arr_3d = amask_arr[np.newaxis, :, :].astype(np.bool_)
+        return img_arr_4d, amask_arr_3d
+
+
+def sample_target(image, target_bb, search_area_factor, output_sz=None):
+    x, y, w, h = [float(v) for v in target_bb]
+    crop_sz = math.ceil(math.sqrt(w * h) * search_area_factor)
+    if crop_sz < 1:
+        raise ValueError("Too small bounding box.")
+
+    x1 = int(round(x + 0.5 * w - 0.5 * crop_sz))
+    y1 = int(round(y + 0.5 * h - 0.5 * crop_sz))
+    x2 = x1 + crop_sz
+    y2 = y1 + crop_sz
+
+    x1_pad = max(0, -x1)
+    y1_pad = max(0, -y1)
+    x2_pad = max(x2 - image.shape[1] + 1, 0)
+    y2_pad = max(y2 - image.shape[0] + 1, 0)
+
+    image_crop = image[y1 + y1_pad:y2 - y2_pad, x1 + x1_pad:x2 - x2_pad, :]
+    image_crop = cv2.copyMakeBorder(image_crop, y1_pad, y2_pad, x1_pad, x2_pad, cv2.BORDER_CONSTANT)
+
+    crop_h, crop_w = image_crop.shape[:2]
+    att_mask = np.ones((crop_h, crop_w), dtype=np.float32)
+    end_x = None if x2_pad == 0 else -x2_pad
+    end_y = None if y2_pad == 0 else -y2_pad
+    att_mask[y1_pad:end_y, x1_pad:end_x] = 0
+
+    if output_sz is None:
+        return image_crop, 1.0, att_mask.astype(np.bool_)
+
+    resize_factor = output_sz / crop_sz
+    image_crop = cv2.resize(image_crop, (output_sz, output_sz))
+    att_mask = cv2.resize(att_mask, (output_sz, output_sz), interpolation=cv2.INTER_NEAREST).astype(np.bool_)
+    return image_crop, resize_factor, att_mask
+
+
+def clip_box(box, height, width, margin=0):
+    x1, y1, w, h = box
+    x2 = x1 + w
+    y2 = y1 + h
+    x1 = min(max(0, x1), width - margin)
+    x2 = min(max(margin, x2), width)
+    y1 = min(max(0, y1), height - margin)
+    y2 = min(max(margin, y2), height)
+    w = max(margin, x2 - x1)
+    h = max(margin, y2 - y1)
+    return [x1, y1, w, h]
 
 
 def parse_args():
@@ -182,7 +238,7 @@ def detect_model_name(model_path):
 class MixFormerV2OnnxRunner:
     def __init__(self, session, template_size, search_size, template_factor, search_factor):
         self.session = session
-        self.preprocessor = PreprocessorX_onnx()
+        self.preprocessor = PreprocessorXOnnx()
         self.input_names = [item.name for item in session.get_inputs()]
         if len(self.input_names) != 3:
             raise ValueError(f"Expected 3 ONNX inputs, got {len(self.input_names)}")
