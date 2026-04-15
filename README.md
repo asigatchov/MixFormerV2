@@ -86,16 +86,22 @@ Script: `export_onnx.py`. It supports:
 - Static or dynamic batch (`--batch_mode static|dynamic`)
 - Automatic post-export validation + ONNX Runtime inference check
 
-Minimal example:
+Minimal example for `mixformerv2_base.pth.tar`:
 
 ```bash
-python export_onnx.py \
-  --checkpoint ./models/MixFormerV2/mixformerv2_small.pth.tar \
-  --config_name 224_depth4_mlp1_score \
-  --output ./models/mixformerv2_online_small.onnx \
+uv run export_onnx.py \
+  --checkpoint ./mixformerv2_base.pth.tar \
+  --config_name 288_depth8_score \
+  --output ./out/mixformerv2_base.onnx \
   --batch_mode static \
   --batch_size 1 \
   --opset_version 17
+```
+
+After export, the script also writes a simplified model:
+
+```bash
+./out/mixformerv2_base_simplified.onnx
 ```
 
 Common argument notes:
@@ -115,6 +121,34 @@ Deployment tips:
 
 - If TensorRT reports unsupported ops, try lowering `--opset_version 16` or upgrading TRT.
 - You can add `--search_size` to force a fixed size and reduce backend optimization uncertainty.
+
+## ONNX Video Inference
+
+Script: `inference_onnx.py`
+
+Minimal example:
+
+```bash
+uv run inference_onnx.py \
+  --model_path ./out/mixformerv2_base_simplified.onnx \
+  --video_path ./vb_man.mp4
+```
+
+Headless example with predefined box:
+
+```bash
+uv run inference_onnx.py \
+  --model_path ./out/mixformerv2_base_simplified.onnx \
+  --video_path ./vb_man.mp4 \
+  --headless \
+  --init_rect 220,120,80,180
+```
+
+Notes:
+
+- Required arguments are exactly `--model_path` and `--video_path`
+- Template/search sizes are read automatically from the ONNX model inputs
+- In GUI mode you can select ROI interactively, pause with `Space`, move with `w/s/a/d`, and reselect ROI with `Enter`
 
 ---
 

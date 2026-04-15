@@ -369,6 +369,11 @@ def main():
         default=1,
         help="Batch size to embed into the exported model (default: 1)",
     )
+    parser.add_argument(
+        "--simplify",
+        action="store_true",
+        help="Optionally write an additional _simplified.onnx file with onnxsim",
+    )
 
     args = parser.parse_args()
 
@@ -461,9 +466,9 @@ def main():
         traceback.print_exc()
         sys.exit(1)
     
-    simplify_onnx_path = args.output.replace(".onnx", "_simplified.onnx")
-    # Simplify the ONNX model.
-    simplify_onnx_model(args.output, simplify_onnx_path)
+    if args.simplify:
+        simplify_onnx_path = args.output.replace(".onnx", "_simplified.onnx")
+        simplify_onnx_model(args.output, simplify_onnx_path)
 
 
 if __name__ == "__main__":

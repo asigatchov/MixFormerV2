@@ -21,16 +21,31 @@ from lib.train.data.processing_utils import sample_target
 from lib.utils.box_ops import clip_box
 
 
-DEFAULT_CONFIG = ROOT_DIR / "experiments" / "mixformer2_vit_online" / "224_depth4_mlp1_score.yaml"
-DEFAULT_CHECKPOINT = ROOT_DIR / "mixformerv2_small.pth.tar"
+MODEL_PRESETS = {
+    "small": {
+        "checkpoint": ROOT_DIR / "mixformerv2_small.pth.tar",
+        "config": ROOT_DIR / "experiments" / "mixformer2_vit_online" / "224_depth4_mlp1_score.yaml",
+    },
+    "base": {
+        "checkpoint": ROOT_DIR / "mixformerv2_base.pth.tar",
+        "config": ROOT_DIR / "experiments" / "mixformer2_vit_online" / "288_depth8_score.yaml",
+    },
+}
+DEFAULT_MODEL = "small"
 WINDOW_NAME = "MixFormerV2"
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="MixFormerV2 video inference demo")
     parser.add_argument("--video_path", required=True, help="path to input video")
-    parser.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT), help="path to model checkpoint")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="path to yaml config")
+    parser.add_argument(
+        "--model",
+        choices=["auto", "small", "base"],
+        default="auto",
+        help="model preset: auto resolves from checkpoint name, default fallback is small",
+    )
+    parser.add_argument("--checkpoint", default="", help="path to model checkpoint")
+    parser.add_argument("--config", default="", help="path to yaml config")
     parser.add_argument(
         "--output_path",
         default="",
@@ -44,6 +59,32 @@ def parse_args():
     parser.add_argument("--online_size", default=None, type=int, help="override online template size")
     parser.add_argument("--update_interval", default=None, type=int, help="override template update interval")
     return parser.parse_args()
+
+
+def detect_model_from_checkpoint(checkpoint_path):
+    checkpoint_name = Path(checkpoint_path).name.lower()
+    for model_name in MODEL_PRESETS:
+        if model_name in checkpoint_name:
+            return model_name
+    return None
+
+
+def resolve_model_assets(args):
+    explicit_model = None if args.model == "auto" else args.model
+    checkpoint_model = detect_model_from_checkpoint(args.checkpoint) if args.checkpoint else None
+
+    if explicit_model and checkpoint_model and explicit_model != checkpoint_model:
+        raise ValueError(
+            f"--model={explicit_model} conflicts with checkpoint '{args.checkpoint}', "
+            f"which looks like model '{checkpoint_model}'"
+        )
+
+    model_name = explicit_model or checkpoint_model or DEFAULT_MODEL
+    preset = MODEL_PRESETS[model_name]
+
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else preset["checkpoint"]
+    config_path = Path(args.config) if args.config else preset["config"]
+    return model_name, checkpoint_path, config_path
 
 
 def parse_init_rect(value):
@@ -69,6 +110,17 @@ def create_writer(output_path, fps, frame_size):
     return cv2.VideoWriter(str(output_path), fourcc, fps, frame_size)
 
 
+def ensure_display_window():
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+
+
+def close_display_window():
+    try:
+        cv2.destroyWindow(WINDOW_NAME)
+    except cv2.error:
+        pass
+
+
 def seek_to_frame(capture, frame_index):
     capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
     ok, frame = capture.read()
@@ -92,7 +144,6 @@ def browse_for_init_rect(capture, first_frame):
     frame = first_frame
     paused = True
 
-    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     while True:
         cv2.imshow(WINDOW_NAME, draw_browse_overlay(frame, frame_index, paused))
         key = cv2.waitKey(0 if paused else 30) & 0xFF
@@ -301,30 +352,40 @@ def ensure_train_local_module():
         return EnvironmentSettings
 
 
-def draw_overlay(frame, bbox, score=None, label="MixFormerV2"):
-    x, y, w, h = [int(round(value)) for value in bbox]
+def draw_overlay(frame, bbox=None, score=None, label="MixFormerV2", frame_index=None, paused=False, needs_reinit=False):
     vis = frame.copy()
 
-    shade = vis.copy()
-    cv2.rectangle(shade, (x, y), (x + w, y + h), (20, 190, 255), -1)
-    vis = cv2.addWeighted(shade, 0.15, vis, 0.85, 0.0)
+    if bbox is not None:
+        x, y, w, h = [int(round(value)) for value in bbox]
+        shade = vis.copy()
+        cv2.rectangle(shade, (x, y), (x + w, y + h), (20, 190, 255), -1)
+        vis = cv2.addWeighted(shade, 0.15, vis, 0.85, 0.0)
 
-    cv2.rectangle(vis, (x, y), (x + w, y + h), (20, 190, 255), 3)
-    cv2.circle(vis, (x + w // 2, y + h // 2), 3, (20, 190, 255), -1)
+        cv2.rectangle(vis, (x, y), (x + w, y + h), (20, 190, 255), 3)
+        cv2.circle(vis, (x + w // 2, y + h // 2), 3, (20, 190, 255), -1)
 
-    score_text = f"{score:.3f}" if score is not None else "init"
-    text = f"{label}  score={score_text}"
-    text_origin = (max(10, x), max(30, y - 12))
-    cv2.putText(vis, text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4)
-    cv2.putText(vis, text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20, 190, 255), 2)
+        score_text = f"{score:.3f}" if score is not None else "init"
+        text = f"{label}  score={score_text}"
+        text_origin = (max(10, x), max(30, y - 12))
+        cv2.putText(vis, text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4)
+        cv2.putText(vis, text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20, 190, 255), 2)
+
+    status = "pause" if paused else "play"
+    frame_text = f"frame={frame_index} [{status}]" if frame_index is not None else status
+    cv2.putText(vis, frame_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+    cv2.putText(vis, "Enter: reselect ROI  Space: play/pause  Esc/Q: quit", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+    cv2.putText(vis, "d:+1  a:-1  w:+15  s:-15", (20, 102), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+    if needs_reinit:
+        cv2.putText(vis, "Navigation changed frame. Press Enter to set a new ROI.", (20, 136), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 180, 255), 2)
     return vis
 
 
 def main():
     args = parse_args()
     video_path = Path(args.video_path)
-    checkpoint_path = Path(args.checkpoint)
-    config_path = Path(args.config)
+    model_name, checkpoint_path, config_path = resolve_model_assets(args)
+    capture = None
+    writer = None
 
     if not video_path.is_file():
         raise FileNotFoundError(f"Video not found: {video_path}")
@@ -337,91 +398,181 @@ def main():
     device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
     torch.backends.cudnn.benchmark = device.type == "cuda"
 
-    cfg = update_new_config_from_file(str(config_path))
-    tracker = MixFormerV2Runner(
-        cfg=cfg,
-        checkpoint_path=str(checkpoint_path),
-        device=device,
-        search_area_scale=args.search_area_scale,
-        online_size=args.online_size,
-        update_interval=args.update_interval,
-    )
+    try:
+        cfg = update_new_config_from_file(str(config_path))
+        print(f"Using model preset: {model_name}")
+        print(f"Using checkpoint: {checkpoint_path}")
+        print(f"Using config: {config_path}")
+        tracker = MixFormerV2Runner(
+            cfg=cfg,
+            checkpoint_path=str(checkpoint_path),
+            device=device,
+            search_area_scale=args.search_area_scale,
+            online_size=args.online_size,
+            update_interval=args.update_interval,
+        )
 
-    capture = cv2.VideoCapture(str(video_path))
-    if not capture.isOpened():
-        raise RuntimeError(f"Failed to open video: {video_path}")
+        capture = cv2.VideoCapture(str(video_path))
+        if not capture.isOpened():
+            raise RuntimeError(f"Failed to open video: {video_path}")
 
-    ok, first_frame = capture.read()
-    if not ok or first_frame is None:
-        raise RuntimeError(f"Failed to read first frame from video: {video_path}")
-
-    start_frame = first_frame
-    start_frame_index = 0
-    if args.init_rect:
-        x, y, w, h = parse_init_rect(args.init_rect)
-    elif headless:
-        raise RuntimeError("Headless mode requires --init_rect x,y,w,h")
-    else:
-        start_frame, start_frame_index, (x, y, w, h) = browse_for_init_rect(capture, first_frame)
-
-    init_bbox = [x, y, w, h]
-    tracker.initialize(start_frame, init_bbox)
-
-    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) or first_frame.shape[1]
-    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) or first_frame.shape[0]
-    fps = capture.get(cv2.CAP_PROP_FPS)
-    if not fps or fps <= 0:
-        fps = 25.0
-
-    output_path = resolve_output_path(video_path, args.output_path)
-    writer = create_writer(output_path, fps, (width, height))
-
-    first_vis = draw_overlay(start_frame, init_bbox, score=None, label="MixFormerV2")
-    writer.write(first_vis)
-    if not headless:
-        cv2.imshow(WINDOW_NAME, first_vis)
-        if cv2.waitKey(1) > 0:
-            capture.release()
-            writer.release()
-            cv2.destroyAllWindows()
-            return
-
-    if start_frame_index > 0:
-        capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame_index + 1)
-
-    frame_index = start_frame_index + 1
-    processed_frames = 1
-    tick_start = cv2.getTickCount()
-    while True:
-        if args.max_frames and processed_frames >= args.max_frames:
-            break
-
-        ok, frame = capture.read()
-        if not ok or frame is None:
-            break
-
-        out = tracker.track(frame)
-        vis = draw_overlay(frame, out["target_bbox"], score=out.get("conf_score"), label="MixFormerV2")
-        writer.write(vis)
+        ok, first_frame = capture.read()
+        if not ok or first_frame is None:
+            raise RuntimeError(f"Failed to read first frame from video: {video_path}")
 
         if not headless:
-            cv2.imshow(WINDOW_NAME, vis)
-            if cv2.waitKey(1) & 0xFF in (27, ord("q")):
+            ensure_display_window()
+
+        start_frame = first_frame
+        start_frame_index = 0
+        if args.init_rect:
+            x, y, w, h = parse_init_rect(args.init_rect)
+        elif headless:
+            raise RuntimeError("Headless mode requires --init_rect x,y,w,h")
+        else:
+            start_frame, start_frame_index, (x, y, w, h) = browse_for_init_rect(capture, first_frame)
+
+        init_bbox = [x, y, w, h]
+        tracker.initialize(start_frame, init_bbox)
+
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) or first_frame.shape[1]
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) or first_frame.shape[0]
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        if not fps or fps <= 0:
+            fps = 25.0
+
+        output_path = resolve_output_path(video_path, args.output_path)
+        writer = create_writer(output_path, fps, (width, height))
+
+        current_frame = start_frame
+        current_bbox = init_bbox
+        current_score = None
+        frame_index = start_frame_index
+        paused = False
+        needs_reinit = False
+
+        first_vis = draw_overlay(
+            current_frame,
+            current_bbox,
+            score=current_score,
+            label="MixFormerV2",
+            frame_index=frame_index,
+            paused=paused,
+            needs_reinit=needs_reinit,
+        )
+        writer.write(first_vis)
+        if not headless:
+            cv2.imshow(WINDOW_NAME, first_vis)
+
+        if start_frame_index > 0:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame_index + 1)
+
+        processed_frames = 1
+        tick_start = cv2.getTickCount()
+        while True:
+            if args.max_frames and processed_frames >= args.max_frames:
                 break
 
-        frame_index += 1
-        processed_frames += 1
+            if not headless:
+                current_vis = draw_overlay(
+                    current_frame,
+                    current_bbox,
+                    score=current_score,
+                    label="MixFormerV2",
+                    frame_index=frame_index,
+                    paused=paused,
+                    needs_reinit=needs_reinit,
+                )
+                cv2.imshow(WINDOW_NAME, current_vis)
+                key = cv2.waitKey(0 if paused else 1) & 0xFF
+                if key in (27, ord("q")):
+                    break
+                if key == ord(" "):
+                    if needs_reinit:
+                        paused = True
+                    else:
+                        paused = not paused
+                    continue
+                if key in (13, 10):
+                    rect = cv2.selectROI(WINDOW_NAME, current_frame, False, False)
+                    if rect[2] > 0 and rect[3] > 0:
+                        tracker.initialize(current_frame.copy(), list(rect))
+                        current_bbox = list(rect)
+                        current_score = None
+                        needs_reinit = False
+                        current_vis = draw_overlay(
+                            current_frame,
+                            current_bbox,
+                            score=current_score,
+                            label="MixFormerV2",
+                            frame_index=frame_index,
+                            paused=paused,
+                            needs_reinit=needs_reinit,
+                        )
+                        writer.write(current_vis)
+                        cv2.imshow(WINDOW_NAME, current_vis)
+                        cv2.waitKey(1)
+                    continue
+                if paused and key in (ord("d"), ord("a"), ord("w"), ord("s")):
+                    if key == ord("d"):
+                        next_index = frame_index + 1
+                    elif key == ord("a"):
+                        next_index = frame_index - 1
+                    elif key == ord("w"):
+                        next_index = frame_index + 15
+                    else:
+                        next_index = frame_index - 15
 
-    elapsed = (cv2.getTickCount() - tick_start) / cv2.getTickFrequency()
-    effective_frames = max(processed_frames - 1, 1)
-    print(f"Saved output to: {output_path}")
-    print(f"Processed frames: {processed_frames}")
-    print(f"Tracking FPS: {effective_frames / max(elapsed, 1e-6):.2f}")
+                    total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+                    if total_frames > 0:
+                        next_index = max(0, min(total_frames - 1, next_index))
+                    else:
+                        next_index = max(0, next_index)
 
-    capture.release()
-    writer.release()
-    if not headless:
-        cv2.destroyAllWindows()
+                    next_frame = seek_to_frame(capture, next_index)
+                    if next_frame is not None:
+                        current_frame = next_frame
+                        frame_index = next_index
+                        current_bbox = None
+                        current_score = None
+                        needs_reinit = True
+                    continue
+                if paused:
+                    continue
+
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                break
+
+            out = tracker.track(frame)
+            frame_index += 1
+            processed_frames += 1
+            current_frame = frame
+            current_bbox = out["target_bbox"]
+            current_score = out.get("conf_score")
+            current_vis = draw_overlay(
+                current_frame,
+                current_bbox,
+                score=current_score,
+                label="MixFormerV2",
+                frame_index=frame_index,
+                paused=paused,
+                needs_reinit=needs_reinit,
+            )
+            writer.write(current_vis)
+
+        elapsed = (cv2.getTickCount() - tick_start) / cv2.getTickFrequency()
+        effective_frames = max(processed_frames - 1, 1)
+        print(f"Saved output to: {output_path}")
+        print(f"Processed frames: {processed_frames}")
+        print(f"Tracking FPS: {effective_frames / max(elapsed, 1e-6):.2f}")
+    finally:
+        if capture is not None:
+            capture.release()
+        if writer is not None:
+            writer.release()
+        if not headless:
+            close_display_window()
 
 
 if __name__ == "__main__":
